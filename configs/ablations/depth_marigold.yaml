@@ -1,0 +1,4 @@
+# usage: run_single.py --config configs/default.yaml --override configs/ablations/depth_marigold.yaml
+depth:
+  backend: marigold
+  model_id: prs-eth/marigold-depth-lcm-v1-0

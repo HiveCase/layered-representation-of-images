@@ -1,0 +1,2 @@
+inpainting:
+  backend: lama          # fast, non-generative; strong on background texture
