@@ -1,0 +1,14 @@
+torch>=2.2
+torchvision
+transformers>=4.44
+diffusers>=0.30
+accelerate
+opencv-python-headless
+pillow
+numpy
+scipy
+pyyaml
+tqdm
+lpips
+scikit-image
+imageio[ffmpeg]
