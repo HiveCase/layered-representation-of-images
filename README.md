@@ -1,7 +1,7 @@
 # Layered Representations from a Single Image
-### Strategy A — A Modular Pipeline of Frozen Pretrained Models
+### A Modular Pipeline of Frozen Pretrained Models
 
-Turn **one ordinary RGB image** into a **stack of depth-ordered, semantically labelled RGBA layers** that can be pulled apart, edited, re-lit, and re-composed — with no training required.
+Turn **one ordinary RGB image** into a **stack of depth-ordered, semantically labelled RGBA layers** that can be pulled apart, edited, re-lit, and re-composed with pre-trained model.
 
 ![Pipeline architecture](assets/fig_architecture.png)
 
@@ -26,15 +26,15 @@ Turn **one ordinary RGB image** into a **stack of depth-ordered, semantically la
 
 ---
 
-## 1. What this project does
+## 1. What is layered representation of images
 
 Given a **single bitmap RGB image**, the pipeline produces a **layered representation** that separates the scene into interpretable, re-composable layers. For every input image the system outputs a stack of RGBA layers with:
 
-- **(a) Semantic grouping** — pixels are grouped into meaningful entities (people, animals, vehicles, furniture, background *stuff*).
-- **(b) Depth order** — layers are sorted near → far so they can be composited back correctly and slid apart for parallax.
-- **(c) Intrinsic appearance split** *(stretch)* — each layer can be decomposed into **albedo** (base colour) and **shading** (illumination) for relighting.
+- **(a) Semantic grouping:** pixels are grouped into meaningful entities (people, animals, vehicles, furniture, background *stuff*).
+- **(b) Depth order:** layers are sorted near → far so they can be composited back correctly and slid apart for parallax.
+- **(c) Intrinsic appearance split:** each layer can be decomposed into **albedo** (base color) and **shading** (illumination) for relighting.
 
-The defining design choice of **Strategy A** is that it is a **modular pipeline of frozen, pretrained models** — every stage is an off-the-shelf expert model wired together with classical geometry and compositing. **Nothing is trained.** This makes the system transparent, debuggable, and swappable: each stage can be replaced with an alternative backend via a single config flag.
+The defining design choice is that it is a **modular pipeline of frozen, pretrained models** every stage is an off-the-shelf expert model wired together with classical geometry and compositing. This makes the system transparent, debuggable, and swappable: each stage can be replaced with an alternative backend via a single config flag.
 
 ---
 
@@ -42,10 +42,10 @@ The defining design choice of **Strategy A** is that it is a **modular pipeline 
 
 A flat image collapses a 3D scene into a single grid of pixels, discarding *what* is in the scene and *how far away* each thing is. Recovering an explicit layer stack unlocks a range of downstream applications:
 
-- **Editing** — delete, move, or recolour an object and the scene behind it is already reconstructed.
-- **Animation (parallax)** — shift layers at depth-dependent rates to fake camera motion from a still image (the "2.5D" or Ken-Burns effect).
-- **Relighting** — with the albedo/shading split, change the lighting of individual layers.
-- **Downstream vision** — the layer stack is a compact, structured scene description usable by other models.
+- **Editing:** delete, move, or recolor an object and the scene behind it is already reconstructed.
+- **Animation (parallax):** shift layers at depth-dependent rates to fake camera motion from a still image.
+- **Relighting:** with the albedo/shading split, change the lighting of individual layers.
+- **Downstream vision:** the layer stack is a compact, structured scene description usable by other models.
 
 ---
 
@@ -53,13 +53,17 @@ A flat image collapses a 3D scene into a single grid of pixels, discarding *what
 
 The pipeline takes a single flat image (left) and explodes it into an ordered stack of complete RGBA layers (right):
 
-**Input — one flat RGB image**
+**Input: one flat RGB image**
 
 ![Input scene](assets/input_scene.png)
 
-**Output — depth-ordered, semantically labelled RGBA layers**
+<br>
+
+**Output: depth-ordered, semantically labelled RGBA layers**
 
 ![Layer stack](assets/fig_layer_stack.png)
+
+<br>
 
 Each layer carries its **semantic class**, its **group**, and a **relative depth**, recorded in `stack.json`. Composited back in order, the layers reproduce the original image exactly; pulled apart, each is a standalone, hole-free sprite.
 
@@ -81,13 +85,13 @@ The pipeline is orchestrated by `src/lir/pipeline.py`, which reads a config and 
 | — | **Recomposition** | `compositing.py` | Composite layers back (Porter–Duff "over") to verify fidelity | — |
 | 4 | **Intrinsics** *(stretch)* | `intrinsics.py` | Split each layer into albedo + shading | Careaga–Aksoy ordinal shading (external) |
 
-**Design principle — modularity.** Because each stage is isolated behind a config, running an ablation (say, Marigold depth instead of Depth Anything, or LaMa inpainting instead of SD-2) is a one-line change and requires no code edits.
+**Design principle** Because each stage is isolated behind a config, running an ablation (say, Marigold depth instead of Depth Anything, or LaMa inpainting instead of SD-2) is a one-line change and requires no code edits.
 
 ---
 
-## 5. The hard part: genuine object completion (amodal peeling)
+## 5. The hard part: amodal peeling
 
-The most technically interesting stage is **peeling**. A naïve pipeline sets each object layer's transparency to its *visible* silhouette — so the moment you slide that object aside, any region that was hidden behind a nearer object is simply **missing**. The layers are not truly re-composable.
+The most technically interesting stage is **peeling**. A naive pipeline sets each object layer's transparency to its *visible* silhouette, so the moment you slide that object aside, any region that was hidden behind a nearer object is simply **missing**. The layers are not truly re-composable.
 
 This project reconstructs those hidden regions. For each object, processed near → far, the pixels occluded by nearer layers are identified, their appearance is regenerated, and — crucially — they are **kept in the layer's alpha channel** (and carried through matting, which would otherwise collapse the alpha back to the visible mask).
 
