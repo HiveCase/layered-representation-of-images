@@ -1,0 +1,50 @@
+seed: 42
+device: cuda            # cuda | cpu
+
+segmentation:
+  backend: mask2former   # mask2former | sam2_grounded (extra installs; see segmentation.py)
+  model_id: facebook/mask2former-swin-large-coco-panoptic
+  score_threshold: 0.75
+  min_mask_area: 900     # px; drop specks
+
+grouping:
+  # any class not listed maps to "background"
+  groups:
+    people:    [person]
+    animals:   [cat, dog, horse, sheep, cow, elephant, bear, zebra, giraffe, bird]
+    vehicles:  [car, truck, bus, train, motorcycle, bicycle, airplane, boat]
+    furniture: [chair, couch, bed, dining table, bench, toilet]
+
+depth:
+  backend: depth_anything_v2   # depth_anything_v2 | marigold
+  model_id: depth-anything/Depth-Anything-V2-Base-hf
+
+ordering:
+  statistic: median      # median | mean
+  erode_px: 7            # shrink mask before sampling depth (avoids boundary bleed)
+
+inpainting:
+  backend: sd2           # sd2 | lama
+  model_id: stabilityai/stable-diffusion-2-inpainting
+  prompt_template: "natural continuation of the scene, same style and lighting"
+  steps: 30
+  guidance: 7.5
+  dilate_hole_px: 9      # inpaint slightly beyond the hole for seamless blends
+
+amodal:
+  enabled: true          # recover occluded object regions so layers are complete
+  backend: interior      # interior (no extra weights) | pix2gestalt (external install)
+  # model_id: pix2gestalt   # only used by the pix2gestalt backend
+
+matting:
+  enabled: true
+  model_id: hustvl/vitmatte-small-composition-1k
+  trimap_erode_px: 10
+  trimap_dilate_px: 20
+
+intrinsics:
+  enabled: false         # stretch goal; see src/lir/intrinsics.py
+
+output:
+  max_layers: 8          # keep the N nearest object layers; rest merge into background
+  save_debug: false
