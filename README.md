@@ -1,18 +1,18 @@
 # Layered Representations from a Single Image
 ### A Modular Pipeline of Frozen Pretrained Models
 
-Turn **one ordinary RGB image** into a **stack of depth-ordered, semantically labelled RGBA layers** that can be pulled apart, edited, re-lit, and re-composed with pre-trained model.
+Turn **one ordinary RGB image** into a **stack of depth-ordered, semantically labelled RGBA layers** that can be pulled apart, edited, re-lit, and re-composed, all using pretrained models.
 
 ![Pipeline architecture](assets/fig_architecture.png)
 
 ---
 
 ## Table of Contents
-1. [What this project does](#1-what-this-project-does)
+1. [What is layered representation of images](#1-what-is-layered-representation-of-images)
 2. [Why layered representations matter](#2-why-layered-representations-matter)
 3. [The result at a glance](#3-the-result-at-a-glance)
-4. [How it works — stage by stage](#4-how-it-works--stage-by-stage)
-5. [The hard part: genuine object completion (amodal peeling)](#5-the-hard-part-genuine-object-completion-amodal-peeling)
+4. [How it works, stage by stage](#4-how-it-works-stage-by-stage)
+5. [The hard part: amodal peeling](#5-the-hard-part-amodal-peeling)
 6. [Parallax: the payoff of complete layers](#6-parallax-the-payoff-of-complete-layers)
 7. [Installation](#7-installation)
 8. [Quickstart](#8-quickstart)
@@ -34,7 +34,7 @@ Given a **single bitmap RGB image**, the pipeline produces a **layered represent
 - **(b) Depth order:** layers are sorted near → far so they can be composited back correctly and slid apart for parallax.
 - **(c) Intrinsic appearance split:** each layer can be decomposed into **albedo** (base color) and **shading** (illumination) for relighting.
 
-The defining design choice is that it is a **modular pipeline of frozen, pretrained models** every stage is an off-the-shelf expert model wired together with classical geometry and compositing. This makes the system transparent, debuggable, and swappable: each stage can be replaced with an alternative backend via a single config flag.
+The defining design choice is that it is a **modular pipeline of frozen, pretrained models**, where every stage is an off-the-shelf pretrained model wired together with classical geometry and compositing. This makes the system transparent, debuggable, and swappable: each stage can be replaced with an alternative backend via a single config flag.
 
 ---
 
@@ -69,7 +69,7 @@ Each layer carries its **semantic class**, its **group**, and a **relative depth
 
 ---
 
-## 4. How it works — stage by stage
+## 4. How it works, stage by stage
 
 The pipeline is orchestrated by `src/lir/pipeline.py`, which reads a config and runs each stage in turn. Every stage is a small, independent module.
 
@@ -78,12 +78,12 @@ The pipeline is orchestrated by `src/lir/pipeline.py`, which reads a config and 
 | 1a | **Panoptic segmentation** | `segmentation.py` | Split the image into instance + stuff masks | Mask2Former (COCO-panoptic) |
 | 1b | **Semantic grouping** | `grouping.py` | Map fine COCO classes → coarse groups (people / animals / vehicles / furniture / background) | lookup table |
 | 2a | **Monocular depth** | `depth.py` | Predict a per-pixel relative depth map | Depth Anything V2 |
-| 2b | **Depth ordering** | `ordering.py` | Assign one robust depth per layer (median over an eroded mask) and sort near → far | — |
+| 2b | **Depth ordering** | `ordering.py` | Assign one robust depth per layer (median over an eroded mask) and sort near → far | (none) |
 | 3a | **Amodal peeling** | `peeling.py` + `amodal.py` | Reconstruct each object's hidden (occluded) region so the layer is complete | interior completion (+ pix2gestalt hook) |
 | 3b | **Inpainting** | `inpainting.py` | Fill disoccluded holes (behind foreground) and recovered object regions | Stable Diffusion 2 Inpainting |
 | 3c | **Alpha matting** | `matting.py` | Refine each layer's alpha for soft, clean edges | ViTMatte |
-| — | **Recomposition** | `compositing.py` | Composite layers back (Porter–Duff "over") to verify fidelity | — |
-| 4 | **Intrinsics** *(stretch)* | `intrinsics.py` | Split each layer into albedo + shading | Careaga–Aksoy ordinal shading (external) |
+| (none) | **Recomposition** | `compositing.py` | Composite layers back (Porter-Duff "over") to verify fidelity | (none) |
+| 4 | **Intrinsics** *(stretch)* | `intrinsics.py` | Split each layer into albedo + shading | Careaga-Aksoy ordinal shading (external) |
 
 **Design principle** Because each stage is isolated behind a config, running an ablation (say, Marigold depth instead of Depth Anything, or LaMa inpainting instead of SD-2) is a one-line change and requires no code edits.
 
@@ -93,7 +93,7 @@ The pipeline is orchestrated by `src/lir/pipeline.py`, which reads a config and 
 
 The most technically interesting stage is **peeling**. A naive pipeline sets each object layer's transparency to its *visible* silhouette, so the moment you slide that object aside, any region that was hidden behind a nearer object is simply **missing**. The layers are not truly re-composable.
 
-This project reconstructs those hidden regions. For each object, processed near → far, the pixels occluded by nearer layers are identified, their appearance is regenerated, and — crucially — they are **kept in the layer's alpha channel** (and carried through matting, which would otherwise collapse the alpha back to the visible mask).
+This project reconstructs those hidden regions. For each object, processed near → far, the pixels occluded by nearer layers are identified, their appearance is regenerated, and, crucially, they are **kept in the layer's alpha channel** (and carried through matting, which would otherwise collapse the alpha back to the visible mask).
 
 ![Amodal completion](assets/fig_amodal.png)
 
@@ -101,7 +101,7 @@ This project reconstructs those hidden regions. For each object, processed near 
 
 **Two backends, matching what is honestly recoverable:**
 
-- **`interior` (default, no extra weights).** Recovers occlusion that is *enclosed* by the object's own outline — a strap, a held object, a railing crossing a body. These pixels provably belong to the object (they lie inside its filled silhouette) so they can be reclaimed with confidence. This backend is conservative by design: it never invents extent the image does not support.
+- **`interior` (default, no extra weights).** Recovers occlusion that is *enclosed* by the object's own outline, such as a strap, a held object, or a railing crossing a body. These pixels provably belong to the object (they lie inside its filled silhouette) so they can be reclaimed with confidence. This backend is conservative by design: it never invents extent the image does not support.
 - **`pix2gestalt` (optional, external install).** A diffusion amodal-completion model that hallucinates the object's *entire* shape and appearance, including **boundary** occlusion (e.g. legs cut off behind a car). Enable it in the config once the [pix2gestalt](https://github.com/cvlab-columbia/pix2gestalt) repo is installed.
 
 The **background layer** is always completed: every hole left behind the foreground is inpainted and the layer is made fully opaque, so it stands alone as a clean backdrop.
@@ -110,7 +110,7 @@ The **background layer** is always completed: every hole left behind the foregro
 
 ## 6. Parallax: the payoff of complete layers
 
-Because the layers are complete, they can be shifted independently at depth-scaled rates to synthesise camera motion from a single still — near layers move more, far layers move less:
+Because the layers are complete, they can be shifted independently at depth-scaled rates to synthesise camera motion from a single still, where near layers move more and far layers move less:
 
 ![Parallax animation](assets/anim_parallax.gif)
 
@@ -125,8 +125,8 @@ Generate your own with `scripts/make_parallax.py` (see Quickstart).
 ## 7. Installation
 
 ```bash
-git clone <your-repo-url>
-cd strategy-a-modular-pipeline
+git clone https://github.com/HiveCase/layered-representation-of-images.git
+cd layered-representation-of-images
 pip install -r requirements.txt
 ```
 
@@ -134,7 +134,7 @@ pip install -r requirements.txt
 - Python 3.10+ recommended.
 - A **GPU with ≥ 8 GB VRAM** is recommended. CPU works but is slow.
 - The **first run downloads ~6 GB** of model weights from Hugging Face; they are cached afterwards.
-- The optional `pix2gestalt` and `intrinsics` backends require cloning their external repos — see the module docstrings.
+- The optional `pix2gestalt` and `intrinsics` backends require cloning their external repos; see the module docstrings.
 
 ---
 
@@ -167,7 +167,7 @@ python eval/run_benchmark.py \
 
 ## 9. Configuration & ablations
 
-Everything is driven by `configs/default.yaml`. Swap any stage's backend with an override file — no code changes:
+Everything is driven by `configs/default.yaml`. Swap any stage's backend with an override file, with no code changes:
 
 ```bash
 # Marigold depth instead of Depth Anything V2
@@ -192,7 +192,7 @@ Key knobs:
 
 ## 10. Pretrained models used
 
-**No model is bundled and no model is trained** — all weights download from Hugging Face / external repos on first use. This is a pure inference pipeline of frozen experts.
+**Every stage uses a pretrained model, and no weights are bundled with the repo.** All weights download from Hugging Face or external repos on first use. This is a pure inference pipeline of pretrained experts.
 
 | Role | Model | Source | Status |
 |---|---|---|---|
@@ -204,19 +204,19 @@ Key knobs:
 | Inpainting (ablation) | LaMa | [advimman/lama](https://github.com/advimman/lama) | hook (not wired) |
 | Segmentation (ablation) | SAM 2 + Grounding-DINO | facebookresearch / IDEA-Research | hook (not wired) |
 | Amodal completion | pix2gestalt | [cvlab-columbia/pix2gestalt](https://github.com/cvlab-columbia/pix2gestalt) | optional backend |
-| Intrinsics (stretch) | Careaga–Aksoy ordinal shading | [compphoto/Intrinsic](https://github.com/compphoto/Intrinsic) | optional |
+| Intrinsics (stretch) | Careaga-Aksoy ordinal shading | [compphoto/Intrinsic](https://github.com/compphoto/Intrinsic) | optional |
 | Perceptual metric | LPIPS (AlexNet) | `lpips` package | eval only |
 
 ---
 
 ## 11. Datasets
 
-**You supply your own images — no dataset ships with the repo, and none is used for training.** Datasets appear only as *evaluation inputs*. See [`data/README.md`](data/README.md) for the exact folder layout. In brief:
+**You supply your own images; no dataset ships with the repo.** Because pretrained models are used throughout, datasets appear only as *evaluation inputs*. See [`data/README.md`](data/README.md) for the exact folder layout. In brief:
 
-- **`test_images/`** — your frozen evaluation images (any style: photoreal, anime, vector).
-- **`nyuv2/` or `diode/`** — depth ground truth, used *only* to score depth-ordering accuracy.
-- **`seg_masks/`** — optional per-image instance masks, used to score segmentation mIoU.
-- **`failures/`** — your own gallery of hard/failed cases for the limitations analysis.
+- **`test_images/`:** your frozen evaluation images (any style: photoreal, anime, vector).
+- **`nyuv2/` or `diode/`:** depth ground truth, used *only* to score depth-ordering accuracy.
+- **`seg_masks/`:** optional per-image instance masks, used to score segmentation mIoU.
+- **`failures/`:** your own gallery of hard/failed cases for the limitations analysis.
 
 ---
 
@@ -224,10 +224,10 @@ Key knobs:
 
 `eval/run_benchmark.py` runs the pipeline over a folder and reports:
 
-- **Recomposition fidelity** — PSNR, SSIM, LPIPS between the original and the layers re-composited back together (always computed).
-- **Partition integrity** — a ground-truth-free check that the visible layers *tile* the image (fraction of pixels claimed exactly once / overlapped / unclaimed).
-- **Depth-ordering accuracy** — with `--depth-gt`, the fraction of layer pairs whose predicted near/far order matches the GT depth map (deliverable **b**).
-- **Instance mIoU** — with `--seg-gt`, greedy-matched mask IoU against GT instances (deliverable **a**).
+- **Recomposition fidelity:** PSNR, SSIM, LPIPS between the original and the layers re-composited back together (always computed).
+- **Partition integrity:** a ground-truth-free check that the visible layers *tile* the image (fraction of pixels claimed exactly once / overlapped / unclaimed).
+- **Depth-ordering accuracy:** with `--depth-gt`, the fraction of layer pairs whose predicted near/far order matches the GT depth map (deliverable **b**).
+- **Instance mIoU:** with `--seg-gt`, greedy-matched mask IoU against GT instances (deliverable **a**).
 
 Metric definitions live in `eval/metrics.py`.
 
@@ -250,7 +250,7 @@ out/<name>/
 ## 14. Repository layout
 
 ```
-strategy-a-modular-pipeline/
+layered-representation-of-images/
 ├── configs/
 │   ├── default.yaml              # single source of truth for all stages
 │   └── ablations/                # one-flag backend swaps
@@ -273,15 +273,19 @@ strategy-a-modular-pipeline/
 ├── eval/
 │   ├── metrics.py                # all metric definitions
 │   └── run_benchmark.py          # batch evaluation
-├── data/                         # (you populate — see data/README.md)
-└── requirements.txt
+├── data/
+│   └── README.md                 # dataset sourcing + folder layout (you populate the rest)
+├── assets/                       # figures and animations used in this README
+├── requirements.txt
+├── LICENSE
+└── README.md
 ```
 
 ---
 
 ## 15. Limitations & future work
 
-- **Boundary amodal completion** requires the optional `pix2gestalt` backend; the default `interior` backend recovers only occlusion enclosed by an object's own silhouette (by design — it never fabricates unsupported extent).
+- **Boundary amodal completion** requires the optional `pix2gestalt` backend; the default `interior` backend recovers only occlusion enclosed by an object's own silhouette (by design, so it never fabricates unsupported extent).
 - **Depth is relative, not metric.** Ordering relies on a robust per-layer statistic; very thin or transparent objects can be mis-ordered.
 - **Segmentation drives everything.** Missed or merged instances propagate downstream; tune `score_threshold` / `min_mask_area` per domain.
 - **Inpainting can hallucinate** texture in large disoccluded regions; LaMa may be preferable for structured backgrounds.
